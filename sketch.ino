@@ -1,105 +1,158 @@
 #include <LiquidCrystal_I2C.h>
-#include <DHT.h>
+#include <TM1637TinyDisplay.h>
+#include <RTClib.h>
 
-#define DHTPIN 5
-#define DHTTYPE DHT22
+#define DIO 3
+#define CLK 2
 
-DHT dht(DHTPIN, DHTTYPE);
+TM1637TinyDisplay display(CLK,DIO);
+LiquidCrystal_I2C lcd(0x27,16,2);
+RTC_DS1307 rtc;
 
-LiquidCrystal_I2C lcd(0x27, 16,2);
 
-const int upButton = 2;
-const int downButton = 3;
-const int selectButton = 4;
+int potPin = A0;
 
+const uint8_t btnUp = 10;
+const uint8_t btnDown = 9;
+const uint8_t btnSelect = 8;
+
+
+bool work = false;
+
+enum Status {
+  DRIVING,
+  REST
+};
+
+const char* statusText[] =
+{
+  "Driving",
+  "Rest   "
+};
+
+struct DriverInformation
+{
+  Status status;
+};
+
+DriverInformation driver1 = {REST};
 
 int menu = 1;
-const int maxmenu = 2;
+const int maxMenu = 2;
+float currentlyTruckSpeed = 0;
 
 void setup() {
-  pinMode(upButton, INPUT_PULLUP);
-  pinMode(downButton, INPUT_PULLUP);
-  pinMode(selectButton, INPUT_PULLUP);
+  Serial.begin(9600);
+
+  pinMode(btnUp, INPUT_PULLUP);
+  pinMode(btnDown, INPUT_PULLUP);
+  pinMode(btnSelect, INPUT_PULLUP);
 
   lcd.init();
   lcd.backlight();
+  lcd.print("Welcome!");
 
-  Serial.begin(9600);
-  dht.begin();
+  delay(2000);
 
-  updatemenu();
+  display.begin();
+  display.setBrightness(7);
+
+  lcd.clear();
+  if( !rtc.begin())
+  {
+    lcd.print("RTC is not found");
+    while(1);
+  }
+
+  if( !rtc.isrunning())
+  {
+    lcd.print("RTC settings up");
+    rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+  }
+
+  DateTime now = rtc.now();
+  standardmenu(now, 0);
 }
 
 void loop() {
+  DateTime now = rtc.now();
 
-
-  if ( !digitalRead(downButton))
+  if( btnUp == LOW )
   {
     menu++;
-    if ( menu > maxmenu)
+    if( menu > maxMenu)
+    {
       menu = 1;
+    }
 
-    updatemenu();
-    delay(2000);
+    //updatemenu();
   }
 
-  if ( !digitalRead(upButton))
+  if( btnDown == LOW )
   {
     menu--;
-    if ( menu < 1)
-      menu = maxmenu;
+    if( menu < 1)
+    {
+      menu = maxMenu;
+    }
 
-    updatemenu();
-    delay(2000);
+    //updatemenu();
   }
 
-  if( !digitalRead(selectButton))
+  int value = analogRead(potPin);
+
+  float truckSpeed = map(value,0,1023,0,90); //km/h
+
+  if( truckSpeed != currentlyTruckSpeed)
   {
-    executionAction();
+    currentlyTruckSpeed = truckSpeed;
+    standardmenu(now, currentlyTruckSpeed);
+  }
+
+
+  display.showNumberDec(truckSpeed);
+
+  if(truckSpeed > 0 && driver1.status == REST)
+  {
+    driver1.status = DRIVING;
+    lcd.clear();
+    
+    lcd.setCursor(0,0);
+    lcd.print("Status:");
+  
+    lcd.setCursor(0,1);
+    lcd.print(statusText[driver1.status]);
+
     delay(2000);
   }
 
 }
 
-void updatemenu() {
-  lcd.clear();
-
-  switch (menu)
-  {
-    case 1:
-      lcd.print("> Homerseklet");
-      break;
-    case 2:
-      lcd.print("> Paratartalom");
-      break;
-  }
-}
-
-void executionAction()
+void standardmenu(DateTime now, float truckspeed)
 {
   lcd.clear();
 
-  float temperature = dht.readTemperature();
-  float humidity = dht.readHumidity();
+  int hour = now.hour();
+  int minute = now.minute();
 
-  if (isnan(temperature)) {
-    Serial.println("Szenzor hiba!");
-    return;
-  }
+  lcd.setCursor(0,0);
 
-  switch (menu)
-  {
-    case 1:
-      lcd.setCursor(0,0);
-      lcd.print("> Homerseklet");
-      lcd.setCursor(0,1);
-      lcd.print(temperature);
-      break;
-    case 2:
-      lcd.setCursor(0,0);
-      lcd.print("> Paratartalom");
-      lcd.setCursor(0,1);
-      lcd.print(humidity);
-      break;
-  }
+  if( hour < 10)
+    lcd.print("0");
+  lcd.print(hour);
+
+  lcd.print(":");
+  
+  if( minute < 10)
+    lcd.print("0");
+  lcd.print(minute);
+
+  lcd.setCursor(12,0);
+  lcd.print(truckspeed);
+
+
+  lcd.setCursor(0,1);
+  lcd.print("Status: ");
+  lcd.print(statusText[driver1.status]);
 }
+
